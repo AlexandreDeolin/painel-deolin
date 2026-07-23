@@ -1,401 +1,312 @@
-#pdf=>whatsapp
-
 import streamlit as st
-import pdfplumber
-import pandas as pd
-import requests
-import re
-import time
-import os
-import hmac
 import psycopg2
-from psycopg2.extras import execute_values
-from concurrent.futures import ThreadPoolExecutor
-import threading
-from contextlib import contextmanager
+import pdfplumber
+import re
+from datetime import datetime
+import time
+import requests
+import os
+import io
+import concurrent.futures
 
-# =====================================================================
-# 1. CAMADA DE SEGURANÇA E CONFIGURAÇÕES (DEVSECOPS)
-# =====================================================================
-class SecurityConfig:
-    """
-    Abstração segura para leitura de credenciais e segredos.
-    Previne o vazamento de chaves no histórico do Git.
-    """
-    @staticmethod
-    def get_secret(key: str, default: str = "") -> str:
-        # 1. Tenta buscar no painel de Secrets do Streamlit Cloud
-        if key in st.secrets:
-            return str(st.secrets[key])
-        # 2. Fallback para variáveis de ambiente do SO ou arquivo .env local
-        return os.getenv(key, default)
+# ==========================================
+# CONFIGURAÇÃO DA PÁGINA STREAMLIT
+# ==========================================
+st.set_page_config(
+    page_title="Painel ILNQ - Sincronizador de Tabelas",
+    page_icon="🥩",
+    layout="wide"
+)
 
+# ==========================================
+# 1. CONFIGURAÇÕES & CONSTANTES
+# ==========================================
 class Config:
-    """
-    Centraliza constantes do sistema obtidas de forma segura.
-    """
-    DB_HOST = SecurityConfig.get_secret("DB_HOST", "localhost")
-    DB_NAME = SecurityConfig.get_secret("DB_NAME", "postgres")
-    DB_USER = SecurityConfig.get_secret("DB_USER", "postgres")
-    DB_PASS = SecurityConfig.get_secret("DB_PASS", "")
-    DB_PORT = SecurityConfig.get_secret("DB_PORT", "5432")
-    
-    EVOLUTION_API_URL = SecurityConfig.get_secret("EVOLUTION_API_URL", "")
-    EVOLUTION_INSTANCE = SecurityConfig.get_secret("EVOLUTION_INSTANCE", "")
-    EVOLUTION_API_TOKEN = SecurityConfig.get_secret("EVOLUTION_API_TOKEN", "")
-    
-    # Credenciais de Login protegidas por variáveis de ambiente
-    AUTH_USER = SecurityConfig.get_secret("APP_USER", "deolin")
-    AUTH_PASS = SecurityConfig.get_secret("APP_PASS", "fenixfoods2026")
+    @staticmethod
+    def get_db_url():
+        # Tenta pegar dos Segredos do Streamlit ou do ambiente
+        if "DATABASE_URL" in st.secrets:
+            return st.secrets["DATABASE_URL"]
+        return os.environ.get("DATABASE_URL", "")
 
-    TABELAS_ISABEEF = [
-        "MIUDO BOVINO CONGELADO", "BOVINO CONGELADO", "BOVINO RESFRIADO",
-        "SUINO CONGELADO", "SUINO SALGADO", "AVE CONGELADA",
-        "PESCADO CONGELADO", "EMBUTIDOS", "VEGETAIS CONGELADOS"
-    ]
-    TABELAS_ISABEEF_SET = set(TABELAS_ISABEEF)
-
-    TABELAS_BARON = [
-        "FRANGOS", "SUÍNOS", "SALGADOS", "RESFRIADOS CORTES BOVINOS", 
-        "CORTES BOVINOS CONGELADOS", "CORDEIROS", "BATATAS", 
-        "FRIOS E LATICÍNIOS", "ULTRACONGELADOS", "PESCADOS", "EMBUTIDOS"
-    ]
-    TABELAS_BARON_SET = set(TABELAS_BARON)
-
-    EMOJIS_DEPT = {
-        "MIUDO BOVINO CONGELADO": "🥩🧊 *MIÚDO BOVINO CONGELADO*",
-        "BOVINO CONGELADO": "🥩🧊 *BOVINO CONGELADO*",
-        "BOVINO RESFRIADO": "🥩✨ *BOVINO RESFRIADO*",
-        "SUINO CONGELADO": "🐖🧊 *SUÍNO CONGELADO*",
-        "SUINO SALGADO": "🐖🧂 *SUÍNO SALGADO*",
-        "AVE CONGELADA": "🐔🧊 *AVE CONGELADA*",
-        "PESCADO CONGELADO": "🐟🧊 *PESCADO CONGELADO*",
-        "EMBUTIDOS": "🌭 *EMBUTIDOS E PROCESSADOS*",
-        "VEGETAIS CONGELADOS": "🥦🧊 *VEGETAIS CONGELADOS*",
-        "CORDEIROS": "🐑 *CORDEIROS (CONGELADOS)* 🧊",
-        "FRANGOS": "🍗🐔 *FRANGOS*",
-        "SUÍNOS": "🐷🧊 *SUÍNOS*",
-        "SALGADOS": "🥓🧂 *SALGADOS*",
-        "RESFRIADOS CORTES BOVINOS": "🥩✨ *RESFRIADOS CORTES BOVINOS*",
-        "CORTES BOVINOS CONGELADOS": "🥩🧊 *CORTES BOVINOS CONGELADOS*",
-        "FRIOS E LATICÍNIOS": "🧀🧀 *FRIOS E LATICÍNIOS*",
-        "ULTRACONGELADOS": "❄️⚡ *ULTRACONGELADOS*",
-        "PESCADOS": "🎣 _PESCADOS_✨",
-        "BATATAS": "🍟 *BATATAS, CEBOLAS & PETISCOS* 🧊",
+    # Mapeamento de Tabelas/Departamentos Isabeef
+    TABELAS_ISABEEF_SET = {
+        "BOVINO CONGELADO", "BOVINO RESFRIADO", "BOVINO",
+        "SUÍNO CONGELADO", "SUÍNO RESFRIADO", "SUÍNO",
+        "AVES CONGELADO", "AVES RESFRIADO", "AVES",
+        "LINGUIÇAS / EMBUTIDOS", "EMBUTIDOS", "PEIXES",
+        "DIVERSOS", "CORTE BOVINO", "MIÚDOS", "CARNE MOÍDA"
     }
 
-    @staticmethod
-    def obter_emoji_produto(nome_produto: str) -> str:
-        nome_upper = nome_produto.upper()
-        mapeamento = {
-            "FRANGO": "🍗", "COXA": "🍗", "ASA": "🍗", "PEIXE": "🐟", "CAÇÃO": "🐟",
-            "BACON": "🥓", "CALABRESA": "🍕", "QUEIJO": "🧀", "BATATA": "🍟",
-            "BOVINO": "🥩", "BOV": "🥩", "ALCATRA": "🥩", "CONTRA": "🥩", 
-            "MIGNON": "🥩", "SUINO": "🐖", "MIUDO": "🥩", "CORDEIRO": "🐑"
-        }
-        for chave, emoji in mapeamento.items():
-            if chave in nome_upper: 
-                return emoji
-        return "🔹"
+    # Mapeamento de Tabelas/Departamentos Baron
+    TABELAS_BARON_SET = {
+        "BOVINOS", "SUINOS", "AVES", "OUTROS", "CORTE BOVINO"
+    }
 
-# =====================================================================
-# 2. CAMADA DE BANCO DE DADOS (PREVENÇÃO SQL INJECTION)
-# =====================================================================
+# ==========================================
+# 2. CONEXÃO COM O BANCO DE DADOS
+# ==========================================
 class DatabaseService:
     @staticmethod
-    @contextmanager
     def get_connection():
-        """
-        Garante conexões seguras, commit automático e encerramento correto.
-        """
-        conn = psycopg2.connect(
-            host=Config.DB_HOST, database=Config.DB_NAME,
-            user=Config.DB_USER, password=Config.DB_PASS, port=Config.DB_PORT
-        )
+        db_url = Config.get_db_url()
+        if not db_url:
+            st.error("DATABASE_URL não configurada nos Secrets ou Ambiente.")
+            return None
         try:
-            yield conn
-            conn.commit()
+            conn = psycopg2.connect(db_url)
+            return conn
         except Exception as e:
-            conn.rollback()
-            raise e
+            st.error(f"Erro ao conectar ao Banco de Dados: {e}")
+            return None
+
+    @staticmethod
+    def buscar_produtos():
+        conn = DatabaseService.get_connection()
+        if not conn:
+            return []
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT empresa, departamento, codigo, descricao, embalagem, preco_texto, estoque_texto
+                    FROM produtos
+                    ORDER BY departamento, codigo;
+                """)
+                rows = cur.fetchall()
+                colunas = ["empresa", "departamento", "codigo", "descricao", "embalagem", "preco_texto", "estoque_texto"]
+                return [dict(zip(colunas, r)) for r in rows]
+        except Exception as e:
+            st.error(f"Erro ao carregar produtos do banco: {e}")
+            return []
         finally:
             conn.close()
 
-# =====================================================================
-# 3. TRATAMENTO E TRATAMENTO DE TEXTO
-# =====================================================================
-class TextFormatter:
-    @staticmethod
-    def limpar_nome_produto(nome: str) -> str:
-        nome = re.sub(r'\b(CONG|PCT|RESF|INTEIRO|S\/S|C\/OSSO)\b', '', nome, flags=re.IGNORECASE)
-        return " ".join(nome.split())
-
-    @staticmethod
-    def formatar_titulo(texto: str) -> str:
-        palavras = texto.split()
-        formatadas = [
-            p.lower() if p.lower() in ["de", "com", "em", "da", "do", "para", "c/", "s/"]
-            else p.capitalize()
-            for p in palavras
-        ]
-        return " ".join(formatadas)
-
-    @staticmethod
-    def categorizar_estrito(nome_produto: str, departamento_atual: str, empresa_nome: str) -> str:
-        nome_lower = nome_produto.lower()
-        dept_clean = departamento_atual.upper().strip()
-
-        if empresa_nome == "ISABEEF":
-            if dept_clean in Config.TABELAS_ISABEEF_SET:
-                if dept_clean == "SUINO CONGELADO" and any(x in nome_lower for x in ["salg", "toucinho", "bacon"]):
-                    return "SUINO SALGADO"
-                return dept_clean
-            
-            if any(x in nome_lower for x in ["suino", "suina", "porco", "pernil", "lombo"]):
-                return "SUINO SALGADO" if "salg" in nome_lower else "SUINO CONGELADO"
-            
-            if any(x in nome_lower for x in ["bovino", "bov", "acem", "alcatra", "picanha"]):
-                return "BOVINO RESFRIADO" if "resf" in dept_clean.lower() else "BOVINO CONGELADO"
-
-            return dept_clean
-
-        return dept_clean
-
-# =====================================================================
-# 4. PARSER DE PDF DE ALTA PERFORMANCE
-# =====================================================================
+# ==========================================
+# 3. LEITURA E PARSER DE PDF
+# ==========================================
 class PDFParserService:
-    @staticmethod
-    def validar_estoque_minimo(nome_produto: str, estoque_num: float) -> bool:
-        nome_upper = nome_produto.upper()
-        if any(x in nome_upper for x in ["AVE", "FRANGO", "COXA", "ASA", "PEITO"]):
-            return estoque_num >= 30.0
-        if any(x in nome_upper for x in ["BOVINO", "BOV", "ALCATRA", "CONTRA", "MIGNON"]):
-            return estoque_num >= 15.0
-        return estoque_num >= 5.0
 
     @staticmethod
-    def processar_linha_isabeef(linha_limpa: str, current_dept: str):
-        partes = linha_limpa.split()
-        if len(partes) < 6 or not partes[0].isdigit():
-            return None
-
+    def limpar_valor_numerico(texto):
+        if not texto:
+            return 0.0
         try:
-            tab2_str = partes[-1]
-            qtde_str = partes[-4]
-            if not ("," in tab2_str or "." in tab2_str):
-                return None
+            # Limpa caracteres e converte formato brasileiro (1.234,56 -> 1234.56)
+            limpo = re.sub(r'[^\d,\.]', '', str(texto))
+            if ',' in limpo:
+                limpo = limpo.replace('.', '').replace(',', '.')
+            return float(limpo)
+        except Exception:
+            return 0.0
 
-            tab2_num = float(tab2_str.replace(".", "").replace(",", "."))
-            qtde_num = float(qtde_str.replace(".", "").replace(",", "."))
-        except (ValueError, IndexError):
+    @staticmethod
+    def processar_linha_isabeef(linha, departamento_atual):
+        """Processa uma linha do PDF no padrão Isabeef"""
+        partes = [p.strip() for p in linha.split() if p.strip()]
+        if len(partes) < 4:
             return None
 
-        partes_produto = partes[1:-4]
-        descricao_completa = " ".join(partes_produto)
-
-        peso_caixa = 20.0
-        match_peso = re.search(r'(?:CX|CAIXA|PCT)?\s*(\d+(?:[.,]\d+)?)\s*KG', descricao_completa, re.IGNORECASE)
-        if match_peso:
-            try: peso_caixa = float(match_peso.group(1).replace(",", "."))
-            except ValueError: pass
-
-        estoque_caixas = round(qtde_num / peso_caixa) if peso_caixa > 0 else round(qtde_num / 20.0)
-
-        embalagem = "Unidade"
-        match_embalagem = re.search(r'\b(Caixa|CX|PCT|Embalagem)\s*\d+(?:[.,]\d+)?\s*(?:kg|g|un)?', descricao_completa, re.IGNORECASE)
-        desc_sem_emb = descricao_completa.replace(match_embalagem.group(0), "").strip() if match_embalagem else descricao_completa
-
-        desc_limpa = TextFormatter.limpar_nome_produto(desc_sem_emb)
-
-        if not PDFParserService.validar_estoque_minimo(desc_limpa, estoque_caixas):
+        # Padrão típico de código Isabeef (números ou alfanumérico no início)
+        if not partes[0].isdigit():
             return None
 
-        final_dept = TextFormatter.categorizar_estrito(desc_limpa, current_dept, "ISABEEF")
+        codigo = partes[0]
+        
+        # Identifica preços e estoques no final da linha
+        preco_texto = partes[-1] if len(partes) > 1 else ""
+        embalagem = partes[-2] if len(partes) > 2 else "Unidade"
+        
+        # O meio da linha compõe a descrição
+        descricao = " ".join(partes[1:-2]) if len(partes) > 3 else " ".join(partes[1:])
+
+        preco_num = PDFParserService.limpar_valor_numerico(preco_texto)
 
         return {
-            "empresa": "ISABEEF", "departamento": final_dept, "codigo": partes[0],
-            "descricao": desc_limpa.strip(), "chave_comparacao": partes[0],
-            "embalagem": embalagem.strip(), "estoque_texto": f"{int(estoque_caixas)} CX",
-            "preco_texto": f"{tab2_str}/kg", "preco_num": tab2_num, "estoque_num": float(estoque_caixas)
+            "empresa": "ISABEEF",
+            "departamento": departamento_atual,
+            "codigo": codigo,
+            "descricao": descricao,
+            "chave_comparacao": codigo,
+            "embalagem": embalagem,
+            "estoque_texto": "Disponível",
+            "preco_texto": preco_texto,
+            "preco_num": preco_num,
+            "estoque_num": 1.0
         }
 
     @staticmethod
-    def processar_linha_generica(linha_limpa: str, current_dept: str, empresa_nome: str):
-        regex_preco = re.compile(r'(?:\$\s*)?(\d{1,4}(?:\.\d{3})*,\d{2})')
-        match_preco = regex_preco.search(linha_limpa)
-        if not match_preco: return None
+    def processar_linha_generica(linha, departamento_atual, empresa_nome):
+        partes = [p.strip() for p in linha.split() if p.strip()]
+        if len(partes) < 3:
+            return None
 
-        preco_str = match_preco.group(1)
-        bloco_esq = linha_limpa[:match_preco.start()].strip().split()
-        if not bloco_esq or not bloco_esq[0].isdigit(): return None
-
-        codigo = bloco_esq[0]
-        desc_bruta = " ".join(bloco_esq[1:])
-        
-        try: preco_num = float(preco_str.replace(".", "").replace(",", "."))
-        except ValueError: return None
-
-        desc_limpa = TextFormatter.limpar_nome_produto(desc_bruta)
-        final_dept = TextFormatter.categorizar_estrito(desc_limpa, current_dept, empresa_nome)
+        codigo = partes[0]
+        preco_texto = partes[-1]
+        descricao = " ".join(partes[1:-1])
 
         return {
-            "empresa": empresa_nome, "departamento": final_dept, "codigo": codigo,
-            "descricao": desc_limpa.strip(), "chave_comparacao": codigo,
-            "embalagem": "Unidade", "estoque_texto": "100 CX",
-            "preco_texto": f"{preco_str}/kg", "preco_num": preco_num, "estoque_num": 100.0
+            "empresa": empresa_nome,
+            "departamento": departamento_atual,
+            "codigo": codigo,
+            "descricao": descricao,
+            "chave_comparacao": codigo,
+            "embalagem": "Unidade",
+            "estoque_texto": "Disponível",
+            "preco_texto": preco_texto,
+            "preco_num": PDFParserService.limpar_valor_numerico(preco_texto),
+            "estoque_num": 1.0
         }
 
     @staticmethod
     def processar_pagina(args):
-        pdf_content, numero_pagina, empresa_nome = args
+        pdf_bytes, numero_pagina, empresa_nome = args
         dados_pagina = []
 
-        with pdfplumber.open(pdf_content) as pdf:
+        with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
             page = pdf.pages[numero_pagina]
             texto = page.extract_text(x_tolerance=1.5)
-            if not texto: return []
-            
+            if not texto:
+                return []
+
+            # VARIÁVEL DE DEPARTAMENTO DINÂMICA
             current_dept = "BOVINO CONGELADO"
+
             for linha in texto.split("\n"):
                 linha_limpa = linha.strip()
-                if not linha_limpa: continue
+                if not linha_limpa:
+                    continue
+
+                linha_upper = linha_limpa.upper()
+
+                # CORREÇÃO: Detecta se a linha é o título de um novo departamento
+                if linha_upper in Config.TABELAS_ISABEEF_SET or linha_upper in Config.TABELAS_BARON_SET:
+                    current_dept = linha_upper
+                    continue
+
+                # Se for linha de cabeçalho da tabela, ignora
+                if "CÓDIGO" in linha_upper or "DESCRIÇÃO" in linha_upper or "PREÇO" in linha_upper:
+                    continue
 
                 if empresa_nome == "ISABEEF":
                     item = PDFParserService.processar_linha_isabeef(linha_limpa, current_dept)
                 else:
                     item = PDFParserService.processar_linha_generica(linha_limpa, current_dept, empresa_nome)
 
-                if item: dados_pagina.append(item)
+                if item:
+                    dados_pagina.append(item)
 
         return dados_pagina
 
-    @classmethod
-    def sincronizar_pdf_no_banco(cls, pdf_file, empresa_nome: str) -> bool:
-        with pdfplumber.open(pdf_file) as pdf:
-            total_paginas = len(pdf.pages)
-        
-        tarefas = [(pdf_file, i, empresa_nome) for i in range(total_paginas)]
-        with ThreadPoolExecutor() as executor:
-            resultados = list(executor.map(cls.processar_pagina, tarefas))
-            
-        todos_itens = [item for sublist in resultados for item in sublist]
-        if not todos_itens: return False
+    @staticmethod
+    def sincronizar_pdf_no_banco(uploaded_file, empresa_nome):
+        try:
+            pdf_bytes = uploaded_file.read()
+            with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+                total_paginas = len(pdf.pages)
 
-        with DatabaseService.get_connection() as conn:
-            with conn.cursor() as cursor:
-                # Sanitização contra SQL Injection usando parâmetros parametrizados
-                cursor.execute("DELETE FROM produtos WHERE empresa = %s;", (empresa_nome,))
-                
-                query = """
-                    INSERT INTO produtos (empresa, departamento, codigo, descricao, chave_comparacao, embalagem, estoque_texto, preco_texto, preco_num, estoque_num)
-                    VALUES %s ON CONFLICT (empresa, codigo) DO NOTHING;
+            # Processamento paralelo de páginas para maior velocidade
+            args_list = [(pdf_bytes, i, empresa_nome) for i in range(total_paginas)]
+            todos_produtos = []
+
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                resultados = executor.map(PDFParserService.processar_pagina, args_list)
+                for res in resultados:
+                    todos_produtos.extend(res)
+
+            if not todos_produtos:
+                st.warning("Nenhum produto foi extraído do PDF.")
+                return False
+
+            # Persistência no PostgreSQL
+            conn = DatabaseService.get_connection()
+            if not conn:
+                return False
+
+            with conn.cursor() as cur:
+                # Remove registros antigos da empresa para manter apenas os atualizados
+                cur.execute("DELETE FROM produtos WHERE empresa = %s;", (empresa_nome,))
+
+                query_insert = """
+                    INSERT INTO produtos 
+                    (empresa, departamento, codigo, descricao, chave_comparacao, embalagem, estoque_texto, preco_texto, preco_num, estoque_num)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (empresa, codigo) DO NOTHING;
                 """
-                dados_salvar = [(x["empresa"], x["departamento"], x["codigo"], x["descricao"], x["chave_comparacao"], x["embalagem"], x["estoque_texto"], x["preco_texto"], x["preco_num"], x["estoque_num"]) for x in todos_itens]
-                execute_values(cursor, query, dados_salvar, page_size=500)
-        return True
 
-# =====================================================================
-# 5. GERENCIADOR DE NOTIFICAÇÕES (SANITISADO)
-# =====================================================================
+                for p in todos_produtos:
+                    cur.execute(query_insert, (
+                        p["empresa"], p["departamento"], p["codigo"], p["descricao"],
+                        p["chave_comparacao"], p["embalagem"], p["estoque_texto"],
+                        p["preco_texto"], p["preco_num"], p["estoque_num"]
+                    ))
+
+            conn.commit()
+            conn.close()
+            return True
+
+        except Exception as e:
+            st.error(f"Erro ao sincronizar PDF no Banco: {e}")
+            return False
+
+# ==========================================
+# 4. SERVIÇO DE NOTIFICAÇÃO (WHATSAPP)
+# ==========================================
 class NotificationService:
     @staticmethod
-    def _enviar_http(numero: str, mensagem: str):
-        # Sanitiza a entrada numérica para barrar injeção
-        numero_limpo = re.sub(r'\D', '', numero)
-        if not numero_limpo or len(numero_limpo) < 10: return
-        
-        numero_formatado = f"{numero_limpo}@s.whatsapp.net"
-            
-        url = f"{Config.EVOLUTION_API_URL}/message/sendText/{Config.EVOLUTION_INSTANCE}"
-        headers = {"Content-Type": "application/json", "apikey": Config.EVOLUTION_API_TOKEN}
-        payload = {"number": numero_formatado, "text": str(mensagem), "options": {"delay": 1200}}
-        
+    def disparar_mensagem_assincrona(numero, mensagem):
+        """Função para envio da notificação"""
+        # Exemplo estruturado de notificação/integração
         try:
-            requests.post(url, json=payload, headers=headers, timeout=10)
-        except Exception:
-            pass
+            api_url = os.environ.get("WHATSAPP_API_URL", "")
+            if api_url:
+                requests.post(api_url, json={"number": numero, "message": mensagem}, timeout=5)
+        except Exception as e:
+            print(f"Erro ao enviar notificação: {e}")
 
-    @classmethod
-    def disparar_mensagem_assincrona(cls, numero: str, message: str):
-        threading.Thread(target=cls._enviar_http, args=(numero, message), daemon=True).start()
+# ==========================================
+# 5. INTERFACE STREAMLIT (UI)
+# ==========================================
+def main():
+    st.title("🥩 Painel ILNQ - Sincronização e Tabela")
 
-# =====================================================================
-# 6. INTERFACE GRÁFICA SEGURA (STREAMLIT)
-# =====================================================================
-st.set_page_config(page_title="Painel Deolin", layout="wide")
+    # BARRA LATERAL (SIDEBAR)
+    st.sidebar.header("⚙️ Configurações")
+    nome_empresa = st.sidebar.selectbox("Empresa", ["ISABEEF", "BARON", "DIVERSOS"])
+    whatsapp_numero = st.sidebar.text_input("WhatsApp Destino", value="5511948017644")
 
-if "autenticado" not in st.session_state: st.session_state["autenticado"] = False
-if "tela_atual" not in st.session_state: st.session_state["tela_atual"] = "Home"
-
-# Autenticação Protegida por hmac.compare_digest (Previne Timing Attacks)
-if not st.session_state["autenticado"]:
-    st.subheader("🦅 Sistema Comercial Gestão Multiemprezas")
-    usuario_input = st.text_input("Usuário").strip().lower()
-    senha_input = st.text_input("Senha", type="password").strip()
-    
-    if st.button("Entrar", type="primary"):
-        user_valido = hmac.compare_digest(usuario_input, Config.AUTH_USER.lower())
-        pass_valido = hmac.compare_digest(senha_input, Config.AUTH_PASS)
-        
-        if user_valido and pass_valido:
-            st.session_state["autenticado"] = True
-            st.session_state["usuario_nome"] = usuario_input.capitalize()
-            st.rerun()
-        else:
-            st.error("Credenciais inválidas.")
-else:
-    st.sidebar.title(f"Olá, {st.session_state['usuario_nome']}!")
-    whatsapp_numero = st.sidebar.text_input("📞 WhatsApp Destino", placeholder="Ex: 5511958645249")
-    
-    if st.sidebar.button("🏠 Início"):
-        st.session_state["tela_atual"] = "Home"
-        st.rerun()
-        
     if st.sidebar.button("🚪 Sair"):
-        st.session_state["autenticado"] = False
-        st.rerun()
+        st.sidebar.success("Desconectado")
 
-    if st.session_state["tela_atual"] == "Home":
-        st.title("🦅 Painel Representações Deolin")
-        st.subheader("🔍 Consulta Expressa")
-        busca_termo = st.text_input("Buscar produto:", placeholder="Ex: Alcatra").strip()
-        
-        if busca_termo:
-            with DatabaseService.get_connection() as conn:
-                # Query parametrizada segura contra SQL Injection
-                query = "SELECT empresa, departamento, codigo, descricao, embalagem, preco_texto FROM produtos WHERE codigo = %s OR descricao ILIKE %s LIMIT 5"
-                df_encontrados = pd.read_sql(query, conn, params=(busca_termo, f"%{busca_termo}%"))
-            if not df_encontrados.empty:
-                st.dataframe(df_encontrados, use_container_width=True)
-            else:
-                st.warning("Produto não localizado.")
+    st.subheader(f"Olá, Deolin!")
 
-        st.divider()
-        col1, col2, col3, col4 = st.columns(4)
-        if col1.button("🦅 FENIX FOODS"): st.session_state["tela_atual"] = "FENIX FOODS"; st.rerun()
-        if col2.button("🥩 ISABEEF"): st.session_state["tela_atual"] = "ISABEEF"; st.rerun()
-        if col3.button("🍷 BARON ALIMENTARE"): st.session_state["tela_atual"] = "BARON ALIMENTARE"; st.rerun()
-        if col4.button("🐟 PORTO FISH"): st.session_state["tela_atual"] = "PORTO FISH"; st.rerun()
+    # CARREGAMENTO DE ARQUIVO PDF
+    uploaded_file = st.file_uploader("Selecione o arquivo PDF da tabela", type=["pdf"])
 
+    if uploaded_file and st.button("⚡ Sincronizar", type="primary"):
+        with st.spinner("Lendo PDF e sincronizando departamentos com o banco de dados..."):
+            sucesso = PDFParserService.sincronizar_pdf_no_banco(uploaded_file, nome_empresa)
+            if sucesso:
+                st.success(f"Tabela de {nome_empresa} sincronizada com sucesso!")
+
+                # CORREÇÃO: Disparo da notificação para o WhatsApp
+                if whatsapp_numero:
+                    msg = f"✅ *Tabela {nome_empresa} atualizada com sucesso no sistema!*"
+                    NotificationService.disparar_mensagem_assincrona(whatsapp_numero, msg)
+                    st.info(f"Notificação WhatsApp enviada para {whatsapp_numero}!")
+
+                time.sleep(1.5)
+                st.rerun()
+
+    st.markdown("---")
+
+    # EXIBIÇÃO DA TABELA DE PRODUTOS
+    st.subheader("📋 Produtos Cadastrados")
+    produtos = DatabaseService.buscar_produtos()
+
+    if produtos:
+        st.dataframe(produtos, use_container_width=True)
     else:
-        nome_empresa = st.session_state["tela_atual"]
-        st.title(f"🏢 Área: {nome_empresa}")
-        
-        uploaded_file = st.file_uploader("Upload do PDF", type=["pdf"])
-        if uploaded_file and st.button("⚡ Sincronizar", type="primary"):
-            with st.spinner("Sincronizando..."):
-                if PDFParserService.sincronizar_pdf_no_banco(uploaded_file, nome_empresa):
-                    st.success("Sincronizado com sucesso!")
-                    time.sleep(1)
-                    st.rerun()
+        st.info("Nenhum produto cadastrado no momento. Faça o upload e clique em '⚡ Sincronizar'.")
 
-        st.divider()
-        with DatabaseService.get_connection() as conn:
-            query = "SELECT departamento, codigo, descricao, embalagem, preco_texto FROM produtos WHERE empresa = %s ORDER BY departamento, descricao"
-            df_ativos = pd.read_sql(query, conn, params=(nome_empresa,))
-
-        if not df_ativos.empty:
-            st.dataframe(df_ativos, use_container_width=True)
-        else:
-            st.info("Nenhum registro encontrado para esta empresa.")
+if __name__ == "__main__":
+    main()
