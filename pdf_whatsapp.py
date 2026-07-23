@@ -344,7 +344,7 @@ if "autenticado" not in st.session_state: st.session_state["autenticado"] = Fals
 if "tela_atual" not in st.session_state: st.session_state["tela_atual"] = "Home"
 
 if not st.session_state["autenticado"]:
-    st.subheader("🦅 Sistema Comercial Gestão Multiemprezas")
+    st.subheader("🦅 Painel de Representações Deolin")
     usuario_input = st.text_input("Usuário").strip().lower()
     senha_input = st.text_input("Senha", type="password").strip()
     
