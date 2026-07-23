@@ -1,3 +1,4 @@
+
 import streamlit as st
 import pdfplumber
 import pandas as pd
@@ -18,10 +19,6 @@ from contextlib import contextmanager
 # 1. CAMADA DE SEGURANÇA E CONFIGURAÇÕES (DEVSECOPS)
 # =====================================================================
 class SecurityConfig:
-    """
-    Abstração segura para leitura de credenciais e segredos.
-    Previne o vazamento de chaves no histórico do Git.
-    """
     @staticmethod
     def get_secret(key: str, default: str = "") -> str:
         if key in st.secrets:
@@ -29,9 +26,6 @@ class SecurityConfig:
         return os.getenv(key, default)
 
 class Config:
-    """
-    Centraliza constantes do sistema obtidas de forma segura.
-    """
     DB_HOST = SecurityConfig.get_secret("DB_HOST", "dpg-d9gndgjrjlhs73coubhg-a.ohio-postgres.render.com")
     DB_NAME = SecurityConfig.get_secret("DB_NAME", "painel_ilnq")
     DB_USER = SecurityConfig.get_secret("DB_USER", "deolin")
@@ -42,7 +36,6 @@ class Config:
     EVOLUTION_INSTANCE = SecurityConfig.get_secret("EVOLUTION_INSTANCE", "")
     EVOLUTION_API_TOKEN = SecurityConfig.get_secret("EVOLUTION_API_TOKEN", "")
     
-    # Credenciais de Login
     AUTH_USER = SecurityConfig.get_secret("APP_USER", "deolin")
     AUTH_PASS = SecurityConfig.get_secret("APP_PASS", "fenixfoods2026")
 
@@ -88,7 +81,7 @@ class Config:
         for key, value in Config.EMOJIS_DEPT.items():
             if key in dept_upper:
                 return value
-        return f"🔷 *{dept_upper}*"
+        return f"🔷 *DEPARTAMENTO {dept_upper}*"
 
     @staticmethod
     def obter_emoji_produto(nome_produto: str) -> str:
@@ -105,15 +98,12 @@ class Config:
         return "•"
 
 # =====================================================================
-# 2. CAMADA DE BANCO DE DADOS (PREVENÇÃO SQL INJECTION)
+# 2. CAMADA DE BANCO DE DADOS
 # =====================================================================
 class DatabaseService:
     @staticmethod
     @contextmanager
     def get_connection():
-        """
-        Garante conexões seguras, commit automático e encerramento correto.
-        """
         conn = psycopg2.connect(
             host=Config.DB_HOST, database=Config.DB_NAME,
             user=Config.DB_USER, password=Config.DB_PASS, port=Config.DB_PORT
@@ -128,23 +118,13 @@ class DatabaseService:
             conn.close()
 
 # =====================================================================
-# 3. TRATAMENTO E TRATAMENTO DE TEXTO
+# 3. TRATAMENTO DE TEXTO
 # =====================================================================
 class TextFormatter:
     @staticmethod
     def limpar_nome_produto(nome: str) -> str:
         nome = re.sub(r'\b(CONG|PCT|RESF|INTEIRO|S\/S|C\/OSSO)\b', '', nome, flags=re.IGNORECASE)
         return " ".join(nome.split())
-
-    @staticmethod
-    def formatar_titulo(texto: str) -> str:
-        palavras = texto.split()
-        formatadas = [
-            p.lower() if p.lower() in ["de", "com", "em", "da", "do", "para", "c/", "s/"]
-            else p.capitalize()
-            for p in palavras
-        ]
-        return " ".join(formatadas)
 
     @staticmethod
     def categorizar_estrito(nome_produto: str, departamento_atual: str, empresa_nome: str) -> str:
@@ -220,7 +200,7 @@ class PDFParserService:
         final_dept = TextFormatter.categorizar_estrito(desc_limpa, current_dept, "ISABEEF")
 
         return {
-            "empresa": "ISABEEF", "departamento": final_dept, "codigo": partes[0],
+            "empresa": "ISABEEF", "departamento": final_dept.strip().upper(), "codigo": partes[0],
             "descricao": desc_limpa.strip(), "chave_comparacao": partes[0],
             "embalagem": embalagem.strip(), "estoque_texto": f"{int(estoque_caixas)} CX",
             "preco_texto": f"R$ {tab2_str}/kg", "preco_num": tab2_num, "estoque_num": float(estoque_caixas)
@@ -246,7 +226,7 @@ class PDFParserService:
         final_dept = TextFormatter.categorizar_estrito(desc_limpa, current_dept, empresa_nome)
 
         return {
-            "empresa": empresa_nome, "departamento": final_dept, "codigo": codigo,
+            "empresa": empresa_nome, "departamento": final_dept.strip().upper(), "codigo": codigo,
             "descricao": desc_limpa.strip(), "chave_comparacao": codigo,
             "embalagem": "Unidade", "estoque_texto": "100 CX",
             "preco_texto": f"R$ {preco_str}/kg", "preco_num": preco_num, "estoque_num": 100.0
@@ -262,17 +242,16 @@ class PDFParserService:
             texto = page.extract_text(x_tolerance=1.5)
             if not texto: return []
             
-            current_dept = "BOVINO CONGELADO"
+            current_dept = "GERAL"
             for linha in texto.split("\n"):
                 linha_limpa = linha.strip()
                 if not linha_limpa: continue
 
                 linha_upper = linha_limpa.upper()
 
-                # RESTAURAÇÃO: DETECÇÃO DINÂMICA DE DEPARTAMENTO
                 if "DEPARTAMENTO" in linha_upper or "SEÇÃO" in linha_upper or "SETOR" in linha_upper:
-                    dept_extraido = linha_limpa.replace("DEPARTAMENTO", "").replace(":", "").strip()
-                    if dept_extraido: current_dept = dept_extraido
+                    dept_extraido = linha_limpa.replace("DEPARTAMENTO", "").replace(":", "").replace("A)", "").replace("B)", "").replace("C)", "").strip()
+                    if dept_extraido: current_dept = dept_extraido.upper()
                     continue
 
                 if linha_upper in Config.TABELAS_ISABEEF_SET or linha_upper in Config.TABELAS_BARON_SET:
@@ -295,7 +274,6 @@ class PDFParserService:
         
         tarefas = [(pdf_file, i, empresa_nome) for i in range(total_paginas)]
         
-        # Execução sequencial para garantir rigor na ordem das seções do PDF
         resultados = []
         for t in tarefas:
             resultados.append(cls.processar_pagina(t))
@@ -316,26 +294,22 @@ class PDFParserService:
         return True
 
 # =====================================================================
-# 5. GERENCIADOR DE NOTIFICAÇÕES (FORMATADO COM EMOJIS)
+# 5. GERENCIADOR DE NOTIFICAÇÕES (GERAÇÃO POR DEPARTAMENTO ISOLADO)
 # =====================================================================
 class NotificationService:
     @staticmethod
-    def gerar_texto_formatado(df_produtos, empresa_nome: str) -> str:
-        if df_produtos.empty: return ""
+    def gerar_texto_por_departamento(df_produtos, empresa_nome: str, dept_alvo: str) -> str:
+        df_dept = df_produtos[df_produtos['departamento'] == dept_alvo]
+        if df_dept.empty: return ""
         
-        msg = f"🥩 *TABELA DE PREÇOS - {empresa_nome}*\n"
+        emoji_titulo = Config.obter_emoji_dept(dept_alvo)
+        
+        msg = f"🥩 *{empresa_nome}*\n"
+        msg += f"{emoji_titulo}\n"
         msg += f"📅 _Atualizado em: {datetime.now().strftime('%d/%m/%Y %H:%M')}_\n"
         msg += "===================================\n"
 
-        dept_atual = ""
-        for _, row in df_produtos.iterrows():
-            dept = str(row['departamento'])
-            if dept != dept_atual:
-                dept_atual = dept
-                emoji_titulo = Config.obter_emoji_dept(dept_atual)
-                msg += f"\n{emoji_titulo}\n"
-                msg += "-----------------------------------\n"
-            
+        for _, row in df_dept.iterrows():
             emoji_prod = Config.obter_emoji_produto(str(row['descricao']))
             msg += f"{emoji_prod} *[{row['codigo']}]* {row['descricao']} - *{row['preco_texto']}*\n"
 
@@ -362,14 +336,13 @@ class NotificationService:
         threading.Thread(target=cls._enviar_http, args=(numero, message), daemon=True).start()
 
 # =====================================================================
-# 6. INTERFACE GRÁFICA SEGURA (STREAMLIT)
+# 6. INTERFACE GRÁFICA (STREAMLIT)
 # =====================================================================
 st.set_page_config(page_title="Painel Deolin", layout="wide")
 
 if "autenticado" not in st.session_state: st.session_state["autenticado"] = False
 if "tela_atual" not in st.session_state: st.session_state["tela_atual"] = "Home"
 
-# Autenticação Protegida
 if not st.session_state["autenticado"]:
     st.subheader("🦅 Sistema Comercial Gestão Multiemprezas")
     usuario_input = st.text_input("Usuário").strip().lower()
@@ -424,7 +397,7 @@ else:
         
         uploaded_file = st.file_uploader("Upload do PDF", type=["pdf"])
         if uploaded_file and st.button("⚡ Sincronizar", type="primary"):
-            with st.spinner("Sincronizando PDF e organizando departamentos..."):
+            with st.spinner("Sincronizando PDF e separando departamentos..."):
                 if PDFParserService.sincronizar_pdf_no_banco(uploaded_file, nome_empresa):
                     st.success("Sincronizado com sucesso!")
                     time.sleep(1)
@@ -432,37 +405,44 @@ else:
 
         st.divider()
         with DatabaseService.get_connection() as conn:
-            query = "SELECT departamento, codigo, descricao, embalagem, preco_texto FROM produtos WHERE empresa = %s ORDER BY id ASC"
+            query = "SELECT departamento, codigo, descricao, embalagem, preco_texto FROM produtos WHERE empresa = %s ORDER BY departamento, id ASC"
             df_ativos = pd.read_sql(query, conn, params=(nome_empresa,))
 
         if not df_ativos.empty:
-            st.subheader("📲 Enviar Tabela para WhatsApp")
-            texto_wa = NotificationService.gerar_texto_formatado(df_ativos, nome_empresa)
-
-            col_btn1, col_btn2 = st.columns(2)
+            st.subheader("📲 Selecione o Departamento para Envio Separado")
             
-            with col_btn1:
-                # Disparo Direto (WhatsApp Web / App)
-                num_clean = re.sub(r'\D', '', whatsapp_numero)
-                link_wa = f"https://wa.me/{num_clean}?text={urllib.parse.quote(texto_wa)}"
-                st.markdown(f'''
-                    <a href="{link_wa}" target="_blank">
-                        <button style="background-color:#25D366; color:white; border:none; padding:10px; font-size:15px; font-weight:bold; border-radius:6px; cursor:pointer; width:100%;">
-                            💬 Abrir no WhatsApp
-                        </button>
-                    </a>
-                ''', unsafe_allow_html=True)
-            
-            with col_btn2:
-                # Disparo via Evolution API (se configurado)
-                if st.button("🚀 Enviar via Evolution API"):
-                    NotificationService.disparar_mensagem_assincrona(whatsapp_numero, texto_wa)
-                    st.success("Notificação enviada em segundo plano!")
+            lista_deptos = list(df_ativos['departamento'].unique())
+            depto_selecionado = st.selectbox("📂 Departamento:", options=lista_deptos)
 
-            st.text_area("Prévia da Mensagem:", value=texto_wa, height=200)
+            if depto_selecionado:
+                texto_wa = NotificationService.gerar_texto_por_departamento(df_ativos, nome_empresa, depto_selecionado)
+
+                col_btn1, col_btn2 = st.columns(2)
+                
+                with col_btn1:
+                    num_clean = re.sub(r'\D', '', whatsapp_numero)
+                    link_wa = f"https://wa.me/{num_clean}?text={urllib.parse.quote(texto_wa)}"
+                    st.markdown(f'''
+                        <a href="{link_wa}" target="_blank">
+                            <button style="background-color:#25D366; color:white; border:none; padding:12px; font-size:15px; font-weight:bold; border-radius:6px; cursor:pointer; width:100%;">
+                                💬 Abrir "{depto_selecionado}" no WhatsApp
+                            </button>
+                        </a>
+                    ''', unsafe_allow_html=True)
+                
+                with col_btn2:
+                    if st.button(f"🚀 Enviar Todos Departamentos Separados (Evolution API)"):
+                        for d in lista_deptos:
+                            t_msg = NotificationService.gerar_texto_por_departamento(df_ativos, nome_empresa, d)
+                            NotificationService.disparar_mensagem_assincrona(whatsapp_numero, t_msg)
+                            time.sleep(1)
+                        st.success("Notificações de todos os departamentos enviadas individualmente!")
+
+                st.text_area("Prévia da Mensagem Deste Departamento:", value=texto_wa, height=220)
 
             st.divider()
-            st.subheader("📋 Produtos Cadastrados")
-            st.dataframe(df_ativos, use_container_width=True)
+            st.subheader("📋 Visualização da Tabela Cadastrada")
+            df_filtrado_tela = df_ativos[df_ativos['departamento'] == depto_selecionado]
+            st.dataframe(df_filtrado_tela, use_container_width=True)
         else:
             st.info("Nenhum registro encontrado para esta empresa. Faça o upload do PDF e sincronize.")
