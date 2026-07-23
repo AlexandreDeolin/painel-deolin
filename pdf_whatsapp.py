@@ -24,57 +24,61 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Injeção de CSS Customizado para Design Premium e Responsivo
+# CSS com alvos diretos para sobrescrever o estilo nativo do Streamlit
 st.markdown("""
 <style>
-    /* Estilização Geral da Página */
+    /* Estilização Geral do Container Principal */
     .main .block-container {
-        padding-top: 2rem;
-        padding-bottom: 3rem;
-        max-width: 900px;
-        margin: 0 auto;
+        padding-top: 2rem !important;
+        padding-bottom: 3rem !important;
+        max-width: 800px !important;
+        margin: 0 auto !important;
     }
     
     /* Títulos Responsivos e Centralizados */
     .titulo-principal {
-        font-size: clamp(1.8rem, 5vw, 2.5rem);
-        font-weight: 800;
-        text-align: center;
-        color: #FFFFFF;
-        margin-bottom: 0.5rem;
-        line-height: 1.2;
+        font-size: clamp(1.6rem, 5vw, 2.2rem) !important;
+        font-weight: 800 !important;
+        text-align: center !important;
+        color: #FFFFFF !important;
+        margin-bottom: 0.5rem !important;
+        line-height: 1.2 !important;
     }
     
     .subtitulo-principal {
-        font-size: clamp(1.1rem, 3.5vw, 1.4rem);
-        font-weight: 500;
-        text-align: center;
-        color: #A0AEC0;
-        margin-bottom: 1.5rem;
+        font-size: clamp(0.95rem, 3vw, 1.2rem) !important;
+        font-weight: 400 !important;
+        text-align: center !important;
+        color: #A0AEC0 !important;
+        margin-bottom: 2rem !important;
     }
 
-    /* Centralização dos Botões de Empresa */
-    div.stButton > button {
+    /* FORÇAR FORMA E LARGURA IGUAL PARA TODOS OS BOTÕES NO MOBILE E DESKTOP */
+    div[data-testid="stButton"] {
         width: 100% !important;
-        border-radius: 12px !important;
-        height: 3.2rem !important;
+    }
+
+    div[data-testid="stButton"] > button {
+        width: 100% !important;
+        border-radius: 10px !important;
+        min-height: 3.2rem !important;
         font-size: 1rem !important;
-        font-weight: 600 !important;
-        background-color: #1A202C !important;
-        color: #E2E8F0 !important;
-        border: 1px solid #4A5568 !important;
-        transition: all 0.3s ease !important;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1) !important;
+        font-weight: 700 !important;
+        background-color: #1E293B !important;
+        color: #F8FAFC !important;
+        border: 1px solid #334155 !important;
+        transition: all 0.2s ease-in-out !important;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2) !important;
+        margin-bottom: 0.5rem !important;
     }
     
-    div.stButton > button:hover {
-        background-color: #2D3748 !important;
-        color: #FFFFFF !important;
-        border-color: #63B3ED !important;
-        transform: translateY(-2px);
+    div[data-testid="stButton"] > button:hover {
+        background-color: #334155 !important;
+        border-color: #38BDF8 !important;
+        color: #38BDF8 !important;
     }
 
-    /* Botão Destaque do WhatsApp */
+    /* Botão Verde de Destaque do WhatsApp */
     .btn-whatsapp {
         background-color: #25D366 !important;
         color: white !important;
@@ -82,7 +86,7 @@ st.markdown("""
         padding: 14px 20px !important;
         font-size: 16px !important;
         font-weight: bold !important;
-        border-radius: 12px !important;
+        border-radius: 10px !important;
         cursor: pointer !important;
         width: 100% !important;
         text-align: center !important;
@@ -91,13 +95,13 @@ st.markdown("""
         text-decoration: none !important;
     }
 
-    /* Ajuste da Caixa de Texto de Busca */
-    .stTextInput > div > div > input {
+    /* Ajuste da Caixa de Busca */
+    div[data-testid="stTextInput"] input {
         border-radius: 10px !important;
-        text-align: center;
+        text-align: center !important;
     }
 
-    /* Ocultar Elementos Padrão do Streamlit no Mobile */
+    /* Esconder Elementos de Menu Padrão */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
 </style>
@@ -433,31 +437,29 @@ if not st.session_state["autenticado"]:
     st.markdown('<div class="titulo-principal">🦅 Deolin Comercial</div>', unsafe_allow_html=True)
     st.markdown('<div class="subtitulo-principal">Acesse com suas credenciais</div>', unsafe_allow_html=True)
     
-    col_acc1, col_acc2, col_acc3 = st.columns([1, 2, 1])
-    with col_acc2:
-        usuario_input = st.text_input("Usuário").strip().lower()
-        senha_input = st.text_input("Senha", type="password").strip()
+    usuario_input = st.text_input("Usuário").strip().lower()
+    senha_input = st.text_input("Senha", type="password").strip()
+    
+    if st.button("🔑 ACESSAR SISTEMA", type="primary", use_container_width=True):
+        user_valido = hmac.compare_digest(usuario_input, Config.AUTH_USER.lower())
+        pass_valido = hmac.compare_digest(senha_input, Config.AUTH_PASS)
         
-        if st.button("🔑 ACESSAR SISTEMA", type="primary"):
-            user_valido = hmac.compare_digest(usuario_input, Config.AUTH_USER.lower())
-            pass_valido = hmac.compare_digest(senha_input, Config.AUTH_PASS)
-            
-            if user_valido and pass_valido:
-                st.session_state["autenticado"] = True
-                st.session_state["usuario_nome"] = usuario_input.capitalize()
-                st.rerun()
-            else:
-                st.error("Credenciais inválidas.")
+        if user_valido and pass_valido:
+            st.session_state["autenticado"] = True
+            st.session_state["usuario_nome"] = usuario_input.capitalize()
+            st.rerun()
+        else:
+            st.error("Credenciais inválidas.")
 else:
-    # Sidebar Enxuta
+    # Sidebar
     st.sidebar.title(f"👤 {st.session_state['usuario_nome']}")
     whatsapp_numero = st.sidebar.text_input("📞 WhatsApp Destino", value="5511948017644")
     
-    if st.sidebar.button("🏠 Início"):
+    if st.sidebar.button("🏠 Início", use_container_width=True):
         st.session_state["tela_atual"] = "Home"
         st.rerun()
         
-    if st.sidebar.button("🚪 Sair"):
+    if st.sidebar.button("🚪 Sair", use_container_width=True):
         st.session_state["autenticado"] = False
         st.rerun()
 
@@ -466,10 +468,8 @@ else:
         st.markdown('<div class="titulo-principal">🦅 Painel Representações Deolin</div>', unsafe_allow_html=True)
         st.markdown('<div class="subtitulo-principal">Selecione uma empresa ou faça uma busca expressa</div>', unsafe_allow_html=True)
         
-        # Busca Expressa Centralizada
-        col_b1, col_b2, col_b3 = st.columns([1, 3, 1])
-        with col_b2:
-            busca_termo = st.text_input("🔍 Buscar Produto:", placeholder="Digite Alcatra, Cação, etc.").strip()
+        # Busca Expressa
+        busca_termo = st.text_input("🔍 Buscar Produto:", placeholder="Digite Alcatra, Cação, etc.").strip()
         
         if busca_termo:
             with DatabaseService.get_connection() as conn:
@@ -482,33 +482,31 @@ else:
 
         st.markdown("<br>", unsafe_allow_html=True)
         
-        # Grid de Botões Responsivos (2 por linha no celular / 4 no PC)
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("🦅 FENIX FOODS"): 
-                st.session_state["tela_atual"] = "FENIX FOODS"
-                st.rerun()
-            if st.button("🍷 BARON ALIMENTARE"): 
-                st.session_state["tela_atual"] = "BARON ALIMENTARE"
-                st.rerun()
+        # BOTÕES DAS EMPRESAS COM TMANHO UNIFORME E TELA CHEIA (use_container_width=True)
+        if st.button("🦅 FENIX FOODS", use_container_width=True): 
+            st.session_state["tela_atual"] = "FENIX FOODS"
+            st.rerun()
+            
+        if st.button("🍷 BARON ALIMENTARE", use_container_width=True): 
+            st.session_state["tela_atual"] = "BARON ALIMENTARE"
+            st.rerun()
 
-        with col2:
-            if st.button("🥩 ISABEEF"): 
-                st.session_state["tela_atual"] = "ISABEEF"
-                st.rerun()
-            if st.button("🐟 PORTO FISH"): 
-                st.session_state["tela_atual"] = "PORTO FISH"
-                st.rerun()
+        if st.button("🥩 ISABEEF", use_container_width=True): 
+            st.session_state["tela_atual"] = "ISABEEF"
+            st.rerun()
+            
+        if st.button("🐟 PORTO FISH", use_container_width=True): 
+            st.session_state["tela_atual"] = "PORTO FISH"
+            st.rerun()
 
     else:
         # Tela Interna da Empresa
         nome_empresa = st.session_state["tela_atual"]
         st.markdown(f'<div class="titulo-principal">🏢 {nome_empresa}</div>', unsafe_allow_html=True)
         
-        # Upload em Container Elegante
         with st.expander("📤 Atualizar Tabela via PDF", expanded=False):
             uploaded_file = st.file_uploader("Selecione o arquivo PDF", type=["pdf"])
-            if uploaded_file and st.button("⚡ Sincronizar PDF", type="primary"):
+            if uploaded_file and st.button("⚡ Sincronizar PDF", type="primary", use_container_width=True):
                 with st.spinner("Sincronizando PDF e separando departamentos..."):
                     if PDFParserService.sincronizar_pdf_no_banco(uploaded_file, nome_empresa):
                         st.success("Tabela atualizada com sucesso!")
@@ -528,7 +526,6 @@ else:
             if depto_selecionado:
                 texto_wa = NotificationService.gerar_texto_por_departamento(df_ativos, nome_empresa, depto_selecionado)
 
-                # Botões de Ação Visualmente Destacados
                 num_clean = re.sub(r'\D', '', whatsapp_numero)
                 link_wa = f"https://wa.me/{num_clean}?text={urllib.parse.quote(texto_wa)}"
                 
@@ -542,7 +539,7 @@ else:
 
                 st.markdown("<br>", unsafe_allow_html=True)
                 
-                if st.button("🚀 Disparar Todos Departamentos Automaticamente"):
+                if st.button("🚀 Disparar Todos Departamentos Automaticamente", use_container_width=True):
                     for d in lista_deptos:
                         t_msg = NotificationService.gerar_texto_por_departamento(df_ativos, nome_empresa, d)
                         NotificationService.disparar_mensagem_assincrona(whatsapp_numero, t_msg)
