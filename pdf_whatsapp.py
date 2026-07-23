@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pdfplumber
 import pandas as pd
@@ -16,7 +15,96 @@ from datetime import datetime
 from contextlib import contextmanager
 
 # =====================================================================
-# 1. CAMADA DE SEGURANÇA E CONFIGURAÇÕES (DEVSECOPS)
+# CONFIGURAÇÃO DA PÁGINA E ESTILIZAÇÃO VISUAL (RESPONSIVA)
+# =====================================================================
+st.set_page_config(
+    page_title="Painel Deolin", 
+    page_icon="🦅", 
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
+
+# Injeção de CSS Customizado para Design Premium e Responsivo
+st.markdown("""
+<style>
+    /* Estilização Geral da Página */
+    .main .block-container {
+        padding-top: 2rem;
+        padding-bottom: 3rem;
+        max-width: 900px;
+        margin: 0 auto;
+    }
+    
+    /* Títulos Responsivos e Centralizados */
+    .titulo-principal {
+        font-size: clamp(1.8rem, 5vw, 2.5rem);
+        font-weight: 800;
+        text-align: center;
+        color: #FFFFFF;
+        margin-bottom: 0.5rem;
+        line-height: 1.2;
+    }
+    
+    .subtitulo-principal {
+        font-size: clamp(1.1rem, 3.5vw, 1.4rem);
+        font-weight: 500;
+        text-align: center;
+        color: #A0AEC0;
+        margin-bottom: 1.5rem;
+    }
+
+    /* Centralização dos Botões de Empresa */
+    div.stButton > button {
+        width: 100% !important;
+        border-radius: 12px !important;
+        height: 3.2rem !important;
+        font-size: 1rem !important;
+        font-weight: 600 !important;
+        background-color: #1A202C !important;
+        color: #E2E8F0 !important;
+        border: 1px solid #4A5568 !important;
+        transition: all 0.3s ease !important;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1) !important;
+    }
+    
+    div.stButton > button:hover {
+        background-color: #2D3748 !important;
+        color: #FFFFFF !important;
+        border-color: #63B3ED !important;
+        transform: translateY(-2px);
+    }
+
+    /* Botão Destaque do WhatsApp */
+    .btn-whatsapp {
+        background-color: #25D366 !important;
+        color: white !important;
+        border: none !important;
+        padding: 14px 20px !important;
+        font-size: 16px !important;
+        font-weight: bold !important;
+        border-radius: 12px !important;
+        cursor: pointer !important;
+        width: 100% !important;
+        text-align: center !important;
+        display: block !important;
+        box-shadow: 0 4px 12px rgba(37, 211, 102, 0.3) !important;
+        text-decoration: none !important;
+    }
+
+    /* Ajuste da Caixa de Texto de Busca */
+    .stTextInput > div > div > input {
+        border-radius: 10px !important;
+        text-align: center;
+    }
+
+    /* Ocultar Elementos Padrão do Streamlit no Mobile */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+</style>
+""", unsafe_allow_html=True)
+
+# =====================================================================
+# 1. SEGURANÇA E CONFIGURAÇÕES
 # =====================================================================
 class SecurityConfig:
     @staticmethod
@@ -98,7 +186,7 @@ class Config:
         return "•"
 
 # =====================================================================
-# 2. CAMADA DE BANCO DE DADOS
+# 2. BANCO DE DADOS
 # =====================================================================
 class DatabaseService:
     @staticmethod
@@ -148,7 +236,7 @@ class TextFormatter:
         return dept_clean
 
 # =====================================================================
-# 4. PARSER DE PDF DE ALTA PERFORMANCE
+# 4. PARSER DE PDF
 # =====================================================================
 class PDFParserService:
     @staticmethod
@@ -294,7 +382,7 @@ class PDFParserService:
         return True
 
 # =====================================================================
-# 5. GERENCIADOR DE NOTIFICAÇÕES (GERAÇÃO POR DEPARTAMENTO ISOLADO)
+# 5. GERENCIADOR DE NOTIFICAÇÕES
 # =====================================================================
 class NotificationService:
     @staticmethod
@@ -336,30 +424,33 @@ class NotificationService:
         threading.Thread(target=cls._enviar_http, args=(numero, message), daemon=True).start()
 
 # =====================================================================
-# 6. INTERFACE GRÁFICA (STREAMLIT)
+# 6. INTERFACE GRÁFICA MODERNA
 # =====================================================================
-st.set_page_config(page_title="Painel Deolin", layout="wide")
-
 if "autenticado" not in st.session_state: st.session_state["autenticado"] = False
 if "tela_atual" not in st.session_state: st.session_state["tela_atual"] = "Home"
 
 if not st.session_state["autenticado"]:
-    st.subheader("🦅 Painel de Representações Deolin")
-    usuario_input = st.text_input("Usuário").strip().lower()
-    senha_input = st.text_input("Senha", type="password").strip()
+    st.markdown('<div class="titulo-principal">🦅 Deolin Comercial</div>', unsafe_allow_html=True)
+    st.markdown('<div class="subtitulo-principal">Acesse com suas credenciais</div>', unsafe_allow_html=True)
     
-    if st.button("Entrar", type="primary"):
-        user_valido = hmac.compare_digest(usuario_input, Config.AUTH_USER.lower())
-        pass_valido = hmac.compare_digest(senha_input, Config.AUTH_PASS)
+    col_acc1, col_acc2, col_acc3 = st.columns([1, 2, 1])
+    with col_acc2:
+        usuario_input = st.text_input("Usuário").strip().lower()
+        senha_input = st.text_input("Senha", type="password").strip()
         
-        if user_valido and pass_valido:
-            st.session_state["autenticado"] = True
-            st.session_state["usuario_nome"] = usuario_input.capitalize()
-            st.rerun()
-        else:
-            st.error("Credenciais inválidas.")
+        if st.button("🔑 ACESSAR SISTEMA", type="primary"):
+            user_valido = hmac.compare_digest(usuario_input, Config.AUTH_USER.lower())
+            pass_valido = hmac.compare_digest(senha_input, Config.AUTH_PASS)
+            
+            if user_valido and pass_valido:
+                st.session_state["autenticado"] = True
+                st.session_state["usuario_nome"] = usuario_input.capitalize()
+                st.rerun()
+            else:
+                st.error("Credenciais inválidas.")
 else:
-    st.sidebar.title(f"Olá, {st.session_state['usuario_nome']}!")
+    # Sidebar Enxuta
+    st.sidebar.title(f"👤 {st.session_state['usuario_nome']}")
     whatsapp_numero = st.sidebar.text_input("📞 WhatsApp Destino", value="5511948017644")
     
     if st.sidebar.button("🏠 Início"):
@@ -370,10 +461,15 @@ else:
         st.session_state["autenticado"] = False
         st.rerun()
 
+    # Tela Inicial (Home)
     if st.session_state["tela_atual"] == "Home":
-        st.title("🦅 Painel Representações Deolin")
-        st.subheader("🔍 Consulta Expressa")
-        busca_termo = st.text_input("Buscar produto:", placeholder="Ex: Alcatra").strip()
+        st.markdown('<div class="titulo-principal">🦅 Painel Representações Deolin</div>', unsafe_allow_html=True)
+        st.markdown('<div class="subtitulo-principal">Selecione uma empresa ou faça uma busca expressa</div>', unsafe_allow_html=True)
+        
+        # Busca Expressa Centralizada
+        col_b1, col_b2, col_b3 = st.columns([1, 3, 1])
+        with col_b2:
+            busca_termo = st.text_input("🔍 Buscar Produto:", placeholder="Digite Alcatra, Cação, etc.").strip()
         
         if busca_termo:
             with DatabaseService.get_connection() as conn:
@@ -382,67 +478,82 @@ else:
             if not df_encontrados.empty:
                 st.dataframe(df_encontrados, use_container_width=True)
             else:
-                st.warning("Produto não localizado.")
+                st.warning("Nenhum produto localizado com esse termo.")
 
-        st.divider()
-        col1, col2, col3, col4 = st.columns(4)
-        if col1.button("🦅 FENIX FOODS"): st.session_state["tela_atual"] = "FENIX FOODS"; st.rerun()
-        if col2.button("🥩 ISABEEF"): st.session_state["tela_atual"] = "ISABEEF"; st.rerun()
-        if col3.button("🍷 BARON ALIMENTARE"): st.session_state["tela_atual"] = "BARON ALIMENTARE"; st.rerun()
-        if col4.button("🐟 PORTO FISH"): st.session_state["tela_atual"] = "PORTO FISH"; st.rerun()
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        # Grid de Botões Responsivos (2 por linha no celular / 4 no PC)
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("🦅 FENIX FOODS"): 
+                st.session_state["tela_atual"] = "FENIX FOODS"
+                st.rerun()
+            if st.button("🍷 BARON ALIMENTARE"): 
+                st.session_state["tela_atual"] = "BARON ALIMENTARE"
+                st.rerun()
+
+        with col2:
+            if st.button("🥩 ISABEEF"): 
+                st.session_state["tela_atual"] = "ISABEEF"
+                st.rerun()
+            if st.button("🐟 PORTO FISH"): 
+                st.session_state["tela_atual"] = "PORTO FISH"
+                st.rerun()
 
     else:
+        # Tela Interna da Empresa
         nome_empresa = st.session_state["tela_atual"]
-        st.title(f"🏢 Área: {nome_empresa}")
+        st.markdown(f'<div class="titulo-principal">🏢 {nome_empresa}</div>', unsafe_allow_html=True)
         
-        uploaded_file = st.file_uploader("Upload do PDF", type=["pdf"])
-        if uploaded_file and st.button("⚡ Sincronizar", type="primary"):
-            with st.spinner("Sincronizando PDF e separando departamentos..."):
-                if PDFParserService.sincronizar_pdf_no_banco(uploaded_file, nome_empresa):
-                    st.success("Sincronizado com sucesso!")
-                    time.sleep(1)
-                    st.rerun()
+        # Upload em Container Elegante
+        with st.expander("📤 Atualizar Tabela via PDF", expanded=False):
+            uploaded_file = st.file_uploader("Selecione o arquivo PDF", type=["pdf"])
+            if uploaded_file and st.button("⚡ Sincronizar PDF", type="primary"):
+                with st.spinner("Sincronizando PDF e separando departamentos..."):
+                    if PDFParserService.sincronizar_pdf_no_banco(uploaded_file, nome_empresa):
+                        st.success("Tabela atualizada com sucesso!")
+                        time.sleep(1)
+                        st.rerun()
 
-        st.divider()
+        st.markdown("<br>", unsafe_allow_html=True)
+
         with DatabaseService.get_connection() as conn:
             query = "SELECT departamento, codigo, descricao, embalagem, preco_texto FROM produtos WHERE empresa = %s ORDER BY departamento, id ASC"
             df_ativos = pd.read_sql(query, conn, params=(nome_empresa,))
 
         if not df_ativos.empty:
-            st.subheader("📲 Selecione o Departamento para Envio Separado")
-            
             lista_deptos = list(df_ativos['departamento'].unique())
-            depto_selecionado = st.selectbox("📂 Departamento:", options=lista_deptos)
+            depto_selecionado = st.selectbox("📂 Escolha o Departamento:", options=lista_deptos)
 
             if depto_selecionado:
                 texto_wa = NotificationService.gerar_texto_por_departamento(df_ativos, nome_empresa, depto_selecionado)
 
-                col_btn1, col_btn2 = st.columns(2)
+                # Botões de Ação Visualmente Destacados
+                num_clean = re.sub(r'\D', '', whatsapp_numero)
+                link_wa = f"https://wa.me/{num_clean}?text={urllib.parse.quote(texto_wa)}"
                 
-                with col_btn1:
-                    num_clean = re.sub(r'\D', '', whatsapp_numero)
-                    link_wa = f"https://wa.me/{num_clean}?text={urllib.parse.quote(texto_wa)}"
-                    st.markdown(f'''
-                        <a href="{link_wa}" target="_blank">
-                            <button style="background-color:#25D366; color:white; border:none; padding:12px; font-size:15px; font-weight:bold; border-radius:6px; cursor:pointer; width:100%;">
-                                💬 Abrir "{depto_selecionado}" no WhatsApp
-                            </button>
-                        </a>
-                    ''', unsafe_allow_html=True)
-                
-                with col_btn2:
-                    if st.button(f"🚀 Enviar Todos Departamentos Separados (Evolution API)"):
-                        for d in lista_deptos:
-                            t_msg = NotificationService.gerar_texto_por_departamento(df_ativos, nome_empresa, d)
-                            NotificationService.disparar_mensagem_assincrona(whatsapp_numero, t_msg)
-                            time.sleep(1)
-                        st.success("Notificações de todos os departamentos enviadas individualmente!")
+                st.markdown(f'''
+                    <a href="{link_wa}" target="_blank" style="text-decoration: none;">
+                        <div class="btn-whatsapp">
+                            💬 Enviar "{depto_selecionado}" no WhatsApp
+                        </div>
+                    </a>
+                ''', unsafe_allow_html=True)
 
-                st.text_area("Prévia da Mensagem Deste Departamento:", value=texto_wa, height=220)
+                st.markdown("<br>", unsafe_allow_html=True)
+                
+                if st.button("🚀 Disparar Todos Departamentos Automaticamente"):
+                    for d in lista_deptos:
+                        t_msg = NotificationService.gerar_texto_por_departamento(df_ativos, nome_empresa, d)
+                        NotificationService.disparar_mensagem_assincrona(whatsapp_numero, t_msg)
+                        time.sleep(1)
+                    st.success("Todas as listas foram enviadas no segundo plano!")
+
+                st.text_area("Prévia da Mensagem:", value=texto_wa, height=200)
 
             st.divider()
-            st.subheader("📋 Visualização da Tabela Cadastrada")
+            st.subheader("📋 Tabela do Setor")
             df_filtrado_tela = df_ativos[df_ativos['departamento'] == depto_selecionado]
             st.dataframe(df_filtrado_tela, use_container_width=True)
         else:
-            st.info("Nenhum registro encontrado para esta empresa. Faça o upload do PDF e sincronize.")
+            st.info("Nenhum registro encontrado para esta empresa. Faça o upload do PDF acima.")
